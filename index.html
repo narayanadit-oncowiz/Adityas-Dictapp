@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dr Aditya Narayan's Oncowiz Dictaphone</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&display=swap" rel="stylesheet">
+    <!-- Using Phosphor Icons for a clean, modern look -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: '#2563eb',
+                        primaryHover: '#1d4ed8',
+                        danger: '#ef4444',
+                        surface: '#f8fafc',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f1f5f9;
+            -webkit-tap-highlight-color: transparent; /* Remove tap highlight on mobile */
+            height: 100vh;
+            height: 100dvh; /* Dynamic viewport height for mobile browsers */
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; /* Prevent body scrolling, manage in container */
+        }
+
+        .app-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            max-width: 800px;
+            margin: 0 auto;
+            width: 100%;
+            background-color: #ffffff;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+
+        /* Pulse animation for the recording state */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            80% { transform: scale(1.5); opacity: 0; }
+            100% { transform: scale(1.5); opacity: 0; }
+        }
+
+        .recording-pulse {
+            position: relative;
+        }
+        
+        .recording-pulse::before {
+            content: '';
+            position: absolute;
+            left: -20px;
+            top: -20px;
+            right: -20px;
+            bottom: -20px;
+            background-color: rgba(239, 68, 68, 0.4);
+            border-radius: 50%;
+            z-index: -1;
+            animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+            display: none;
+        }
+
+        .is-recording .recording-pulse::before {
+            display: block;
+        }
+
+        .is-recording .mic-btn {
+            background-color: #ef4444; /* danger red */
+            color: white;
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.5);
+        }
+
+        /* Custom scrollbar for textarea */
+        textarea::-webkit-scrollbar {
+            width: 8px;
+        }
+        textarea::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+            border-radius: 4px;
+        }
+        textarea::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 4px;
+        }
+        textarea::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background-color: #334155;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 9999px;
+            font-size: 14px;
+            font-weight: 500;
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            z-index: 1000;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            pointer-events: none;
+        }
+
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+        
+        /* Utility to force text selection in textarea on iOS */
+        #transcription-text {
+            -webkit-user-select: text;
+            user-select: text;
+        }
+    </style>
+</head>
+<body class="text-slate-800 antialiased selection:bg-blue-200 selection:text-blue-900">
+
+    <div class="app-container relative">
+        
+        <!-- Header -->
+        <header class="bg-primary text-white p-4 flex items-center justify-between sticky top-0 z-10 shadow-sm shrink-0">
+            <div class="flex items-center gap-2 w-full">
+                <i class="ph-fill ph-stethoscope text-2xl shrink-0"></i>
+                <h1 class="text-2xl font-bold tracking-tight truncate w-full" style="font-family: 'Caveat', cursive; line-height: 1.2;">Dr Aditya Narayan's Oncowiz Dictaphone</h1>
+            </div>
+            <div class="text-xs font-medium bg-blue-700/50 px-2 py-1 rounded border border-blue-500/30 shrink-0 ml-2">
+                en-IN
+            </div>
+        </header>
+
+        <!-- Status Bar -->
+        <div id="status-bar" class="bg-slate-100 border-b border-slate-200 px-4 py-2 text-sm text-slate-500 flex items-center justify-between shrink-0 transition-colors duration-300">
+            <div class="flex items-center gap-2">
+                <div id="status-indicator" class="w-2 h-2 rounded-full bg-slate-400 transition-colors duration-300"></div>
+                <span id="status-text">Ready to dictate</span>
+            </div>
+            <button id="clear-btn" class="text-slate-400 hover:text-danger transition-colors p-1" title="Clear text" aria-label="Clear text">
+                <i class="ph ph-trash text-lg"></i>
+            </button>
+        </div>
+
+        <!-- Main Editor Area -->
+        <main class="flex-1 flex flex-col p-4 relative overflow-hidden bg-surface">
+            <!-- Interims (what is being spoken right now but not final) -->
+            <div id="interim-text" class="absolute top-6 left-6 right-6 text-slate-400 italic text-lg pointer-events-none z-10 min-h-[1.5em] truncate"></div>
+            
+            <textarea 
+                id="transcription-text" 
+                class="w-full h-full p-2 bg-transparent border-none resize-none focus:ring-0 outline-none text-lg leading-relaxed text-slate-800 placeholder-slate-300"
+                placeholder="Tap the microphone to start dictating..."
+                spellcheck="true"
+            ></textarea>
+        </main>
+
+        <!-- Action Bar (Bottom) -->
+        <footer class="bg-white border-t border-slate-200 p-4 pb-safe flex flex-col gap-4 shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+            
+            <!-- Primary Actions -->
+            <div class="flex justify-center items-center w-full relative">
+                
+                <!-- Tools Left -->
+                <div class="absolute left-0 flex gap-2">
+                    <button id="copy-btn" class="w-12 h-12 flex items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-primary transition-all active:scale-95" aria-label="Copy to clipboard">
+                        <i class="ph ph-copy text-xl"></i>
+                    </button>
+                </div>
+
+                <!-- Record Button (Center) -->
+                <button id="record-btn" class="recording-pulse relative z-10 group" aria-label="Toggle Recording">
+                    <div class="mic-btn w-16 h-16 rounded-full bg-primary text-white flex items-center justify-center shadow-lg transition-all duration-300 transform group-hover:scale-105 active:scale-95">
+                        <i id="mic-icon" class="ph-fill ph-microphone text-3xl"></i>
+                    </div>
+                </button>
+
+                <!-- Tools Right -->
+                <div class="absolute right-0 flex gap-2">
+                     <button id="share-btn" class="w-12 h-12 flex items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-green-600 transition-all active:scale-95 hidden sm:flex" aria-label="Share">
+                        <i class="ph ph-share-network text-xl"></i>
+                    </button>
+                    <button id="export-btn" class="w-12 h-12 flex items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-primary transition-all active:scale-95" aria-label="Export as Word">
+                        <i class="ph ph-file-doc text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Mobile Share Options row (visible on small screens if web share api fails) -->
+            <div id="fallback-share-row" class="hidden justify-center gap-4 mt-2">
+                <button id="wa-share-btn" class="flex items-center gap-2 px-4 py-2 bg-[#25D366] text-white rounded-full text-sm font-medium hover:bg-[#20bd5a] transition-colors active:scale-95">
+                    <i class="ph-fill ph-whatsapp-logo text-lg"></i>
+                    WhatsApp
+                </button>
+                <button id="mail-share-btn" class="flex items-center gap-2 px-4 py-2 bg-slate-600 text-white rounded-full text-sm font-medium hover:bg-slate-700 transition-colors active:scale-95">
+                    <i class="ph-fill ph-envelope-simple text-lg"></i>
+                    Mail
+                </button>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Toast Element -->
+    <div id="toast" class="toast">
+        <i id="toast-icon" class="ph-fill ph-check-circle text-green-400 text-lg"></i>
+        <span id="toast-message">Action successful</span>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            
+            // --- DOM Elements ---
+            const recordBtn = document.getElementById('record-btn');
+            const micIcon = document.getElementById('mic-icon');
+            const textArea = document.getElementById('transcription-text');
+            const interimTextDisplay = document.getElementById('interim-text');
+            const copyBtn = document.getElementById('copy-btn');
+            const clearBtn = document.getElementById('clear-btn');
+            const exportBtn = document.getElementById('export-btn');
+            const shareBtn = document.getElementById('share-btn');
+            
+            // Status UI
+            const statusText = document.getElementById('status-text');
+            const statusIndicator = document.getElementById('status-indicator');
+            const statusBar = document.getElementById('status-bar');
+            
+            // Toast
+            const toastEl = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-message');
+            const toastIcon = document.getElementById('toast-icon');
+
+            // Fallback sharing
+            const fallbackShareRow = document.getElementById('fallback-share-row');
+            const waShareBtn = document.getElementById('wa-share-btn');
+            const mailShareBtn = document.getElementById('mail-share-btn');
+
+            // --- State ---
+            let isRecording = false;
+            let finalTranscript = '';
+            let recognition = null;
+            let silenceTimer = null;
+            const SILENCE_TIMEOUT = 10000; // 10 seconds of silence auto-stops or pauses
+            let isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+            let processedResultIndex = 0; // Tracks processed results to prevent duplication on mobile
+            let lastRawTranscript = ""; // Memory cache to block cross-session duplicates
+
+            // Hide native share button on desktop, show fallback if needed.
+            // On mobile, web share is usually preferred.
+            if(isMobile && navigator.share) {
+                shareBtn.classList.remove('hidden');
+                shareBtn.classList.add('flex');
+            } else {
+                // Show specific buttons if native share not supported
+                shareBtn.classList.add('hidden');
+                fallbackShareRow.classList.remove('hidden');
+                fallbackShareRow.classList.add('flex');
+            }
+
+            // --- Toast Helper ---
+            let toastTimeout;
+            function showToast(message, type = 'success') {
+                clearTimeout(toastTimeout);
+                toastMsg.textContent = message;
+                
+                if (type === 'success') {
+                    toastIcon.className = 'ph-fill ph-check-circle text-green-400 text-lg';
+                } else if (type === 'error') {
+                    toastIcon.className = 'ph-fill ph-x-circle text-red-400 text-lg';
+                } else {
+                    toastIcon.className = 'ph-fill ph-info text-blue-400 text-lg';
+                }
+
+                toastEl.classList.add('show');
+                toastTimeout = setTimeout(() => {
+                    toastEl.classList.remove('show');
+                }, 3000);
+            }
+
+            // --- Speech Recognition Setup ---
+            // Use standard or webkit prefixed
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+            if (!SpeechRecognition) {
+                showToast("Speech recognition not supported in this browser. Please use Chrome, Safari or Edge.", "error");
+                recordBtn.disabled = true;
+                recordBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                statusText.textContent = "Browser not supported";
+                statusIndicator.classList.replace('bg-slate-400', 'bg-red-500');
+            } else {
+                recognition = new SpeechRecognition();
+                
+                // Key configuration for Radiology Dictation
+                recognition.continuous = true;      // Keep recording until explicitly stopped
+                recognition.interimResults = true;  // Show results while speaking
+                recognition.lang = 'en-IN';         // Indian English for better local accent/medical term recognition
+
+                recognition.onstart = function() {
+                    isRecording = true;
+                    processedResultIndex = 0; // Reset index on new session
+                    // Note: We DO NOT reset lastRawTranscript here so it survives silent browser restarts
+                    document.body.classList.add('is-recording');
+                    micIcon.classList.replace('ph-microphone', 'ph-stop');
+                    
+                    statusText.textContent = "Listening...";
+                    statusIndicator.classList.replace('bg-slate-400', 'bg-red-500');
+                    statusIndicator.classList.add('animate-pulse');
+                    statusBar.classList.add('bg-red-50');
+                    
+                    // Reset silence timer on start
+                    resetSilenceTimer();
+                };
+
+                recognition.onresult = function(event) {
+                    resetSilenceTimer();
+                    let interimTranscript = '';
+                    
+                    // We only want to append NEW final results.
+                    // The event.results contains all results since recognition started.
+                    let currentFinal = '';
+
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        let transcriptPiece = event.results[i][0].transcript;
+
+                        if (event.results[i].isFinal) {
+                            // Guard against mobile browser bug duplicating final results
+                            if (i >= processedResultIndex) {
+                                let trimmedPiece = transcriptPiece.trim();
+
+                                // Compare with our memory cache to block phantom duplicates from server restarts
+                                if (trimmedPiece !== lastRawTranscript && trimmedPiece !== "") {
+                                    currentFinal += transcriptPiece;
+                                    lastRawTranscript = trimmedPiece; // Update memory cache
+                                }
+                                
+                                processedResultIndex = i + 1; // Always advance pointer
+                            }
+                        } else {
+                            interimTranscript += transcriptPiece;
+                        }
+                    }
+
+                    // Display interim text floating above
+                    interimTextDisplay.textContent = interimTranscript;
+
+                    // If we got new final text, process and append it
+                    if (currentFinal) {
+                        appendFinalText(currentFinal);
+                        interimTextDisplay.textContent = ''; // clear interim
+                    }
+                };
+
+                recognition.onerror = function(event) {
+                    console.error("Speech recognition error:", event.error);
+                    
+                    if (event.error === 'no-speech') {
+                        // Just a timeout, don't show angry error, maybe just stop
+                        stopRecording();
+                    } else if (event.error === 'audio-capture') {
+                        showToast("No microphone found. Please check permissions.", "error");
+                        stopRecording();
+                    } else if (event.error === 'not-allowed') {
+                        showToast("Microphone access denied.", "error");
+                        stopRecording();
+                    } else if (event.error === 'network') {
+                         showToast("Network error. Speech recognition requires internet.", "error");
+                         stopRecording();
+                    }
+                };
+
+                recognition.onend = function() {
+                    // If it ended automatically (e.g. timeout on mobile), but we still think we are recording,
+                    // we can attempt to restart, or just handle it gracefully.
+                    // Web Speech API often stops automatically on iOS/Android after a pause.
+                    if (isRecording) {
+                        // Auto-restart to keep continuous mode actually continuous
+                        try {
+                             recognition.start();
+                        } catch(e) {
+                             stopRecordingUI();
+                        }
+                    } else {
+                        stopRecordingUI();
+                    }
+                };
+            }
+
+            function appendFinalText(text) {
+                // Formatting specific for medical dictation
+                let processedText = text.trim();
+                
+                // Capitalize first letter if it's the start of the document or after a period
+                const currentVal = textArea.value;
+                if (currentVal.length === 0 || currentVal.trim().endsWith('.') || currentVal.trim().endsWith('\n')) {
+                    processedText = processedText.charAt(0).toUpperCase() + processedText.slice(1);
+                } else if (currentVal.length > 0 && !currentVal.endsWith(' ') && !currentVal.endsWith('\n')) {
+                    // Add space if previous didn't end with one
+                    processedText = ' ' + processedText;
+                }
+
+                // Simple Medical Dictation Formatting rules (can be expanded)
+                processedText = processedText
+                    .replace(/\bnext line\b/gi, '\n')
+                    .replace(/\bnew line\b/gi, '\n')
+                    .replace(/\bnew paragraph\b/gi, '\n\n')
+                    .replace(/\bfull stop\b/gi, '.')
+                    .replace(/\bcomma\b/gi, ',');
+
+                // Fix spaces around punctuation created by replacement
+                processedText = processedText.replace(/\s+\./g, '.').replace(/\s+,/g, ',');
+                
+                // Capitalize after new periods created by "full stop"
+                processedText = processedText.replace(/\.\s+([a-z])/g, function(match, p1) {
+                    return '. ' + p1.toUpperCase();
+                });
+
+                // Append to textarea
+                // Using selection start/end allows inserting at cursor position if user tapped somewhere
+                const startPos = textArea.selectionStart;
+                const endPos = textArea.selectionEnd;
+                
+                textArea.value = textArea.value.substring(0, startPos)
+                    + processedText
+                    + textArea.value.substring(endPos, textArea.value.length);
+                
+                // Move cursor to end of inserted text
+                textArea.selectionStart = textArea.selectionEnd = startPos + processedText.length;
+                
+                // Scroll to bottom if cursor is at bottom
+                textArea.scrollTop = textArea.scrollHeight;
+                
+                // Manually trigger input event in case anything is listening
+                textArea.dispatchEvent(new Event('input'));
+            }
+
+            // Silence timer prevents mic staying on indefinitely in background
+            function resetSilenceTimer() {
+                clearTimeout(silenceTimer);
+                if (isRecording) {
+                    silenceTimer = setTimeout(() => {
+                        console.log("Auto-stopping due to silence");
+                        stopRecording();
+                        showToast("Paused listening due to silence", "info");
+                    }, SILENCE_TIMEOUT);
+                }
+            }
+
+            function toggleRecording() {
+                if (!recognition) return;
+
+                if (isRecording) {
+                    stopRecording();
+                } else {
+                    startRecording();
+                }
+            }
+
+            function startRecording() {
+                if (isRecording) return; // Prevent overlapping instances causing double typing
+                
+                try {
+                    recognition.start();
+                } catch(e) {
+                    console.error("Could not start recognition", e);
+                    // It might already be started, so just force UI sync
+                    isRecording = true;
+                    recognition.onstart(); 
+                }
+            }
+
+            function stopRecording() {
+                isRecording = false;
+                clearTimeout(silenceTimer);
+                try {
+                    recognition.stop();
+                } catch(e) {}
+                stopRecordingUI();
+            }
+
+            function stopRecordingUI() {
+                document.body.classList.remove('is-recording');
+                micIcon.classList.replace('ph-stop', 'ph-microphone');
+                
+                statusText.textContent = "Ready to dictate";
+                statusIndicator.classList.replace('bg-red-500', 'bg-slate-400');
+                statusIndicator.classList.remove('animate-pulse');
+                statusBar.classList.remove('bg-red-50');
+                
+                interimTextDisplay.textContent = '';
+            }
+
+            // Event Listeners
+            recordBtn.addEventListener('click', toggleRecording);
+            
+            // Clear text
+            clearBtn.addEventListener('click', () => {
+                if(textArea.value.trim().length > 0) {
+                    if(confirm("Are you sure you want to clear the current report?")) {
+                        textArea.value = '';
+                        interimTextDisplay.textContent = '';
+                        lastRawTranscript = ""; // Clear memory cache when user clears report
+                        showToast("Report cleared", "info");
+                    }
+                }
+            });
+
+            // Prevent loss of work on accidental reload
+            window.addEventListener('beforeunload', (e) => {
+                if(textArea.value.trim().length > 0) {
+                    e.preventDefault();
+                    e.returnValue = '';
+                }
+            });
+
+            // Copy functionality
+            copyBtn.addEventListener('click', () => {
+                const text = textArea.value.trim();
+                if (!text) {
+                    showToast("Nothing to copy", "info");
+                    return;
+                }
+                
+                // Fallback for mobile (execCommand) vs modern clipboard API
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(text).then(() => {
+                        showToast("Copied to clipboard");
+                    }).catch(err => {
+                        fallbackCopyTextToClipboard(text);
+                    });
+                } else {
+                    fallbackCopyTextToClipboard(text);
+                }
+            });
+
+            function fallbackCopyTextToClipboard(text) {
+                textArea.select();
+                try {
+                    var successful = document.execCommand('copy');
+                    if (successful) showToast("Copied to clipboard");
+                    else showToast("Failed to copy", "error");
+                } catch (err) {
+                    showToast("Failed to copy", "error");
+                }
+                // unselect
+                window.getSelection().removeAllRanges();
+            }
+
+            // Client-side DOCX Generation without external heavy libraries
+            // Constructing a minimal valid OOXML docx file format (which is a ZIP containing XMLs)
+            // For a single file standalone, we build the XML parts and use a data URI
+            exportBtn.addEventListener('click', () => {
+                const text = textArea.value.trim();
+                if (!text) {
+                    showToast("Document is empty", "info");
+                    return;
+                }
+                
+                showToast("Generating document...", "info");
+                setTimeout(() => exportToDocx(text), 100); // slight delay for UI update
+            });
+
+            function exportToDocx(text) {
+                // To create a docx purely client side without massive libraries, 
+                // we can construct a minimal HTML representation that MS Word understands
+                // when saved with a .doc extension (MIME application/msword).
+                // It is simpler and highly effective for text reports.
+                // It ensures the sans-serif font requirement is met.
+                
+                const htmlTemplate = `
+                <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+                <head><meta charset='utf-8'><title>Radiology Report</title>
+                <style>
+                    body { font-family: 'Arial', 'Helvetica', sans-serif; font-size: 11pt; line-height: 1.5; color: #000000; }
+                    p { margin-top: 0; margin-bottom: 10pt; }
+                </style>
+                </head><body>
+                ${text.split('\n').map(p => p.trim() ? `<p>${p.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>` : '<br>').join('')}
+                </body></html>`;
+
+                // Convert string to a Blob
+                const blob = new Blob(['\ufeff', htmlTemplate], {
+                    type: 'application/msword'
+                });
+                
+                // Create download link
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('A');
+                link.href = url;
+                
+                // Date formatting for filename
+                const d = new Date();
+                const dateStr = `${d.getFullYear()}${(d.getMonth()+1).toString().padStart(2,'0')}${d.getDate().toString().padStart(2,'0')}`;
+                link.download = `Radiology_Report_${dateStr}.doc`;
+                
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+                
+                showToast("Report saved successfully");
+            }
+
+            // Web Share API (Mobile native sharing)
+            shareBtn.addEventListener('click', async () => {
+                const text = textArea.value.trim();
+                if (!text) {
+                    showToast("Nothing to share", "info");
+                    return;
+                }
+
+                if (navigator.share) {
+                    try {
+                        await navigator.share({
+                            title: 'Radiology Report',
+                            text: text,
+                        });
+                        showToast("Shared successfully");
+                    } catch (err) {
+                        if (err.name !== 'AbortError') {
+                            console.error("Error sharing:", err);
+                            showToast("Error sharing document", "error");
+                        }
+                    }
+                } else {
+                    showToast("Native sharing not supported", "error");
+                }
+            });
+
+            // Specific share fallbacks
+            waShareBtn.addEventListener('click', () => {
+                const text = textArea.value.trim();
+                if (!text) return showToast("Nothing to share", "info");
+                
+                const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+                window.open(url, '_blank');
+            });
+
+            mailShareBtn.addEventListener('click', () => {
+                const text = textArea.value.trim();
+                if (!text) return showToast("Nothing to share", "info");
+                
+                const subject = encodeURIComponent("Radiology Report");
+                const body = encodeURIComponent(text);
+                window.location.href = `mailto:?subject=${subject}&body=${body}`;
+            });
+
+            // Handle virtual keyboard covering textarea on mobile
+            textArea.addEventListener('focus', () => {
+                // Delay to allow virtual keyboard to appear
+                setTimeout(() => {
+                    window.scrollTo({
+                        top: document.body.scrollHeight,
+                        behavior: 'smooth'
+                    });
+                }, 300);
+            });
+        });
+    </script>
+</body>
+</html>
